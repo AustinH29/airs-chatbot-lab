@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+Network_channel_lab_info.txt
+app.log
+.claude/
