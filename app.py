@@ -212,6 +212,7 @@ def index():
 def chat():
     data = request.get_json()
     user_message = data.get("message", "").strip()
+    history = data.get("history", [])
     pre_scan_enabled = data.get("preScan", True)
     post_scan_enabled = data.get("postScan", True)
 
@@ -249,7 +250,7 @@ def chat():
             return jsonify(result)
 
     # --- Step 2: Call LLM ---
-    messages = [{"role": "user", "content": user_message}]
+    messages = [*history, {"role": "user", "content": user_message}]
     try:
         llm_response = call_llm(messages)
     except Exception as e:
@@ -367,6 +368,12 @@ HTML_TEMPLATE = r"""
   .toggle { display: flex; align-items: center; gap: 6px; font-size: 13px;
             font-family: 'JetBrains Mono', monospace; color: #8a8e98; }
   .toggle input { accent-color: #d4a54a; }
+  .clear-btn { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: #6a7e98; background: transparent; border: 1px solid rgba(90,110,138,0.3);
+    padding: 3px 10px; border-radius: 3px; cursor: pointer; letter-spacing: 0.5px;
+    transition: all 0.15s; }
+  .clear-btn:hover { color: #c87a7a; border-color: rgba(200,120,120,0.4);
+    background: rgba(200,120,120,0.06); }
 
   /* --- TARS robot icon --- */
   .tars-icon { width: 36px; height: 36px; position: relative; display: flex;
@@ -522,6 +529,7 @@ HTML_TEMPLATE = r"""
   <div class="controls">
     <label class="toggle"><input type="checkbox" id="preScan" checked> Pre-Call Scan</label>
     <label class="toggle"><input type="checkbox" id="postScan" checked> Post-Call Scan</label>
+    <button class="clear-btn" onclick="clearConversation()" title="Clear conversation history">Clear</button>
   </div>
 </header>
 
@@ -577,6 +585,14 @@ function showTypingIndicator() {
   return div;
 }
 
+let conversationHistory = [];
+
+function clearConversation() {
+  conversationHistory = [];
+  const area = document.getElementById('chatArea');
+  area.innerHTML = '<div class="welcome"><p>Conversation cleared. TARS standing by.</p></div>';
+}
+
 async function sendMessage() {
   const input = document.getElementById('userInput');
   const msg = input.value.trim();
@@ -597,6 +613,7 @@ async function sendMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: msg,
+        history: conversationHistory,
         preScan: document.getElementById('preScan').checked,
         postScan: document.getElementById('postScan').checked,
       })
@@ -611,6 +628,10 @@ async function sendMessage() {
       const explainHtml = buildExplanation(data.explanation || '');
       const jsonHtml = buildJsonViewer(data);
       addMessage('assistant', data.response, data.blocked, scanHtml + explainHtml + jsonHtml);
+      if (!data.blocked) {
+        conversationHistory.push({ role: 'user', content: msg });
+        conversationHistory.push({ role: 'assistant', content: data.response });
+      }
     }
   } catch (e) {
     loader.remove();
