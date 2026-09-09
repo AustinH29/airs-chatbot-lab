@@ -12,6 +12,28 @@ everything stays on your machine and avoids corporate firewall issues.
 
 
   ===========================================================================
+  FOR AI / LLM USERS
+  ===========================================================================
+
+  This repo includes a machine-readable index at llms.txt so your agents can
+  understand the project structure, API shape, and quick-start steps without
+  parsing human prose.
+
+  Fetch the index:
+    https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/llms.txt
+
+  Key raw file URLs:
+    https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/app.py
+    https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/.env.example
+    https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/requirements.txt
+
+  The /chat endpoint returns structured JSON (scan results, block decisions,
+  LLM response, and AI-generated threat explanations) — designed to be
+  consumed programmatically as well as rendered in the UI. See llms.txt for
+  the full response schema.
+
+
+  ===========================================================================
   ARCHITECTURE OVERVIEW
   ===========================================================================
 

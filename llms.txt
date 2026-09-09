@@ -1,0 +1,64 @@
+# AIRS Chatbot Lab
+
+> A single-file Flask demo wrapping a local Ollama LLM with Palo Alto Networks
+> Prisma AIRS (AI Runtime Security) pre-call and post-call scanning. Built for
+> hands-on demos of AI threat detection: prompt injection, data exfiltration,
+> malicious code, and toxic content.
+
+## Files
+
+- [README-AH.txt](https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/README-AH.txt): Full setup guide, architecture overview, and lab exercises
+- [app.py](https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/app.py): Entire application — Flask routes, AIRS scanning logic, LiteLLM integration, and inline HTML/CSS/JS UI
+- [.env.example](https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/.env.example): Configuration template (LLM model, API base, AIRS keys)
+- [requirements.txt](https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/requirements.txt): Python dependencies
+- [llms.txt](https://raw.githubusercontent.com/AustinH29/airs-chatbot-lab/main/llms.txt): This file
+
+## API
+
+- `GET /` — Serves the chat UI
+- `POST /chat` — Main chat endpoint; body: `{ message, history, preScan, postScan, model }`; returns full scan + LLM response as JSON
+- `GET /api/models` — Lists available Ollama models from localhost:11434
+- `GET /health` — Health check; returns server status and configured model name
+
+### /chat response shape
+
+```json
+{
+  "request":   { "message": "...", "preScan": true, "postScan": true, "model": "ollama/qwen2.5:7b" },
+  "pre_scan":  { "action": "allow|block", "category": "...", "scan_id": "...", "latency_ms": 0 },
+  "post_scan": { "action": "allow|block", "category": "...", "scan_id": "...", "latency_ms": 0 },
+  "response":  "...",
+  "blocked":   false,
+  "blocked_by": null,
+  "explanation": "..."
+}
+```
+
+`blocked_by` is `"pre-call"`, `"post-call"`, or `null`. When blocked, `response`
+contains the block notice text. `explanation` is an AI-generated threat
+briefing (present only when AIRS blocks something).
+
+## Architecture
+
+```
+User prompt → [AIRS pre-scan] → LiteLLM → Ollama (local) → [AIRS post-scan] → response
+```
+
+- LiteLLM runs in-process inside app.py; change `LLM_MODEL` in `.env` to switch
+  providers (Ollama, Anthropic, OpenAI) with no code changes
+- AIRS scanning is optional; without API keys the app runs normally with scans
+  marked SKIPPED
+- TARS persona — bone-dry deadpan assistant from Interstellar, 75% humor, 90% honesty
+
+## Quick start
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows; use source .venv/bin/activate on Mac/Linux
+pip install -r requirements.txt
+cp .env.example .env          # fill in LLM_MODEL, PANW_PRISMA_AIRS_API_KEY, etc.
+python app.py                 # → http://localhost:5000
+```
+
+Requires Python 3.10+ and Ollama running locally (`ollama pull qwen2.5:7b`).
+AIRS keys are optional for local LLM testing.
