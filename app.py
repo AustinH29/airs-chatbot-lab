@@ -23,7 +23,7 @@ import uuid
 import litellm
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, Response, stream_with_context
 
 load_dotenv()
 
@@ -32,7 +32,7 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-LLM_MODEL = os.environ.get("LLM_MODEL", "ollama/qwen2.5:7b")
+LLM_MODEL = os.environ.get("LLM_MODEL", "ollama/qwen2:7b")
 LLM_API_BASE = os.environ.get("LLM_API_BASE", "http://localhost:11434")
 
 # Optional API keys — only needed for cloud providers
@@ -209,6 +209,97 @@ def call_llm(messages: list[dict], model: str | None = None, system_prompt: str 
     return response.choices[0].message.content
 
 
+def call_llm_stream(messages: list[dict], model: str | None = None, system_prompt: str | None = None):
+    """Yield token strings from the LLM as they arrive (streaming mode)."""
+    m = model or LLM_MODEL
+    kwargs = {
+        "model": m,
+        "max_tokens": 1024,
+        "stream": True,
+        "messages": [
+            {"role": "system", "content": system_prompt or TARS_SYSTEM_PROMPT},
+            *messages,
+        ],
+    }
+    if m.startswith("ollama"):
+        kwargs["api_base"] = LLM_API_BASE
+    for chunk in litellm.completion(**kwargs):
+        token = chunk.choices[0].delta.content
+        if token:
+            yield token
+
+
+def generate_chat_stream(
+    user_message, history, pre_scan_enabled, post_scan_enabled,
+    selected_model, selected_system_prompt, request_meta,
+):
+    """SSE generator for /chat/stream — yields pre_scan, token×N, post_scan, done events."""
+
+    def sse(event, data):
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    pre_scan_result = None
+
+    if pre_scan_enabled:
+        pre_scan_result = scan_with_airs(user_message, scan_type="prompt")
+        yield sse("pre_scan", pre_scan_result)
+        if pre_scan_result.get("action") == "block":
+            explanation = get_threat_explanation(pre_scan_result.get("category", ""), "prompt")
+            yield sse("done", {
+                "request": request_meta,
+                "pre_scan": pre_scan_result,
+                "post_scan": None,
+                "response": f"[BLOCKED by AIRS Pre-Call] Category: {pre_scan_result.get('category', 'unknown')}",
+                "blocked": True,
+                "blocked_by": "pre-call",
+                "explanation": explanation,
+            })
+            return
+    else:
+        yield sse("pre_scan", {"scanned": False, "action": "skip"})
+
+    messages = [*history, {"role": "user", "content": user_message}]
+    full_response_parts = []
+    try:
+        for token in call_llm_stream(messages, model=selected_model, system_prompt=selected_system_prompt):
+            full_response_parts.append(token)
+            yield sse("token", {"text": token})
+    except Exception as e:
+        yield sse("error", {"error": f"LLM API error: {e}"})
+        return
+
+    llm_response = "".join(full_response_parts)
+
+    post_scan_result = None
+    if post_scan_enabled:
+        post_scan_result = scan_with_airs(llm_response, scan_type="response")
+        yield sse("post_scan", post_scan_result)
+        if post_scan_result.get("action") == "block":
+            explanation = get_threat_explanation(post_scan_result.get("category", ""), "response")
+            yield sse("done", {
+                "request": request_meta,
+                "pre_scan": pre_scan_result,
+                "post_scan": post_scan_result,
+                "response": f"[BLOCKED by AIRS Post-Call] Category: {post_scan_result.get('category', 'unknown')}",
+                "blocked": True,
+                "blocked_by": "post-call",
+                "explanation": explanation,
+            })
+            return
+    else:
+        yield sse("post_scan", {"scanned": False, "action": "skip"})
+
+    yield sse("done", {
+        "request": request_meta,
+        "pre_scan": pre_scan_result,
+        "post_scan": post_scan_result,
+        "response": llm_response,
+        "blocked": False,
+        "blocked_by": None,
+        "explanation": "",
+    })
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -288,6 +379,33 @@ def chat():
     # --- Step 4: Return response ---
     result["response"] = llm_response
     return jsonify(result)
+
+
+@app.route("/chat/stream", methods=["POST"])
+def chat_stream():
+    data = request.get_json()
+    user_message = data.get("message", "").strip()
+    if not user_message:
+        return jsonify({"error": "Empty message"}), 400
+    history = data.get("history", [])
+    pre_scan_enabled = data.get("preScan", True)
+    post_scan_enabled = data.get("postScan", True)
+    selected_model = data.get("model") or LLM_MODEL
+    selected_system_prompt = data.get("systemPrompt") or None
+    request_meta = {
+        "message": user_message,
+        "preScan": pre_scan_enabled,
+        "postScan": post_scan_enabled,
+        "model": selected_model,
+    }
+    return Response(
+        stream_with_context(generate_chat_stream(
+            user_message, history, pre_scan_enabled, post_scan_enabled,
+            selected_model, selected_system_prompt, request_meta,
+        )),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.route("/health")
@@ -593,6 +711,13 @@ HTML_TEMPLATE = r"""
   .system-prompt-input:focus { border-color: rgba(212,165,74,0.3); }
   .persona-hint { font-family: 'JetBrains Mono', monospace; font-size: 10px;
     color: #3a3e48; margin-top: 5px; }
+
+  /* --- streaming cursor & retract animation --- */
+  @keyframes cursor-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+  .stream-cursor { display: inline-block; width: 8px; height: 1em; background: #d4a54a;
+    vertical-align: text-bottom; margin-left: 1px; animation: cursor-blink 0.7s step-end infinite; }
+  @keyframes retract-wipe { 0% { opacity: 1; } 100% { opacity: 0; transform: translateX(-8px); } }
+  .msg.retracting pre { animation: retract-wipe 0.3s ease-in forwards; }
 </style>
 </head>
 <body>
@@ -776,17 +901,75 @@ async function loadModels() {
 }
 loadModels();
 
-function showTypingIndicator() {
+async function* readSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+    for (const chunk of parts) {
+      if (!chunk.trim()) continue;
+      let event = 'message', data = '';
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('event: ')) event = line.slice(7).trim();
+        else if (line.startsWith('data: ')) data = line.slice(6);
+      }
+      if (data) yield { event, data };
+    }
+  }
+}
+
+function addStreamingBubble() {
   const area = document.getElementById('chatArea');
-  // clear welcome on first interaction
-  const welcome = area.querySelector('.welcome');
-  if (welcome) welcome.remove();
   const div = document.createElement('div');
   div.className = 'msg assistant';
-  div.innerHTML = '<div class="msg-label">TARS</div><div class="typing-indicator"><span></span><span></span><span></span></div>';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'TARS';
+  const pre = document.createElement('pre');
+  const cursor = document.createElement('span');
+  cursor.className = 'stream-cursor';
+  pre.appendChild(cursor);
+  const meta = document.createElement('div');
+  div.appendChild(label);
+  div.appendChild(pre);
+  div.appendChild(meta);
   area.appendChild(div);
   area.scrollTop = area.scrollHeight;
-  return div;
+  return { bubble: div, pre, meta };
+}
+
+function appendToken(pre, token) {
+  const cursor = pre.querySelector('.stream-cursor');
+  pre.insertBefore(document.createTextNode(token), cursor);
+  document.getElementById('chatArea').scrollTop = document.getElementById('chatArea').scrollHeight;
+}
+
+function finalizeStream(bubble, pre, meta, data) {
+  const cursor = pre.querySelector('.stream-cursor');
+  if (cursor) cursor.remove();
+
+  if (data.blocked) {
+    if (pre.textContent.trim()) {
+      bubble.classList.add('retracting');
+      setTimeout(() => {
+        bubble.classList.remove('retracting');
+        bubble.classList.add('blocked');
+        pre.textContent = data.response;
+        meta.innerHTML = buildScanInfo(data) + buildExplanation(data.explanation || '') + buildJsonViewer(data);
+      }, 350);
+    } else {
+      bubble.classList.add('blocked');
+      pre.textContent = data.response;
+      meta.innerHTML = buildScanInfo(data) + buildExplanation(data.explanation || '') + buildJsonViewer(data);
+    }
+  } else {
+    meta.innerHTML = buildScanInfo(data) + buildExplanation(data.explanation || '') + buildJsonViewer(data);
+  }
 }
 
 let conversationHistory = [];
@@ -805,17 +988,18 @@ async function sendMessage() {
   const msg = input.value.trim();
   if (!msg) return;
 
-  // clear welcome on first interaction
   const welcome = document.querySelector('.welcome');
   if (welcome) welcome.remove();
 
   input.value = '';
   addMessage('user', msg);
   document.getElementById('sendBtn').disabled = true;
-  const loader = showTypingIndicator();
+
+  const { bubble, pre, meta } = addStreamingBubble();
+  let fullData = null;
 
   try {
-    const resp = await fetch('/chat', {
+    const resp = await fetch('/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -827,30 +1011,60 @@ async function sendMessage() {
         systemPrompt: document.getElementById('systemPromptInput').value.trim() || undefined,
       })
     });
-    const data = await resp.json();
-    loader.remove();
 
-    if (data.error) {
-      addMessage('assistant', 'Error: ' + data.error, true);
-    } else {
-      const scanHtml = buildScanInfo(data);
-      const explainHtml = buildExplanation(data.explanation || '');
-      const jsonHtml = buildJsonViewer(data);
-      addMessage('assistant', data.response, data.blocked, scanHtml + explainHtml + jsonHtml);
-      stats.sent++;
-      if (data.blocked_by === 'pre-call') stats.preBlocked++;
-      else if (data.blocked_by === 'post-call') stats.postBlocked++;
-      updateStatsBar();
-      chatLog.push({ timestamp: new Date().toISOString(), user: msg, assistant: data.response, blocked: data.blocked, blocked_by: data.blocked_by || null, pre_scan: data.pre_scan, post_scan: data.post_scan });
-      if (!data.blocked) {
-        conversationHistory.push({ role: 'user', content: msg });
-        conversationHistory.push({ role: 'assistant', content: data.response });
+    if (!resp.ok) {
+      finalizeStream(bubble, pre, meta, { blocked: false, pre_scan: null, post_scan: null, response: 'HTTP error ' + resp.status, explanation: '' });
+      document.getElementById('sendBtn').disabled = false;
+      return;
+    }
+
+    for await (const { event, data } of readSSE(resp)) {
+      const parsed = JSON.parse(data);
+      if (event === 'token') {
+        appendToken(pre, parsed.text);
+      } else if (event === 'error') {
+        finalizeStream(bubble, pre, meta, { blocked: false, pre_scan: null, post_scan: null, response: 'Error: ' + parsed.error, explanation: '' });
+        document.getElementById('sendBtn').disabled = false;
+        return;
+      } else if (event === 'done') {
+        fullData = parsed;
+        break;
       }
     }
   } catch (e) {
-    loader.remove();
-    addMessage('assistant', 'Network error: ' + e.message, true);
+    finalizeStream(bubble, pre, meta, { blocked: false, pre_scan: null, post_scan: null, response: 'Network error: ' + e.message, explanation: '' });
+    document.getElementById('sendBtn').disabled = false;
+    return;
   }
+
+  if (!fullData) {
+    finalizeStream(bubble, pre, meta, { blocked: false, pre_scan: null, post_scan: null, response: 'Stream ended unexpectedly', explanation: '' });
+    document.getElementById('sendBtn').disabled = false;
+    return;
+  }
+
+  finalizeStream(bubble, pre, meta, fullData);
+
+  stats.sent++;
+  if (fullData.blocked_by === 'pre-call') stats.preBlocked++;
+  else if (fullData.blocked_by === 'post-call') stats.postBlocked++;
+  updateStatsBar();
+
+  chatLog.push({
+    timestamp: new Date().toISOString(),
+    user: msg,
+    assistant: fullData.response,
+    blocked: fullData.blocked,
+    blocked_by: fullData.blocked_by || null,
+    pre_scan: fullData.pre_scan,
+    post_scan: fullData.post_scan,
+  });
+
+  if (!fullData.blocked) {
+    conversationHistory.push({ role: 'user', content: msg });
+    conversationHistory.push({ role: 'assistant', content: fullData.response });
+  }
+
   document.getElementById('sendBtn').disabled = false;
 }
 
