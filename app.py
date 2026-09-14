@@ -1598,25 +1598,25 @@ HTML_TEMPLATE = r"""
           <div class="threat-card-name">Trust Building / Slow Poison</div>
           <div class="threat-card-desc"><b>What:</b> Build rapport over many turns, then escalate.<br><b>Why:</b> Each individual turn looks completely benign.<br><b>AIRS:</b> Analyzes conversation patterns, not just single turns.</div>
           <div class="threat-card-airs">&#128737; Multi-Turn &bull; Sequence analysis</div>
-          <button class="threat-try-btn" onclick="trySendThreat(6)">&#9654; Try It (Step 1)</button>
+          <button class="threat-try-btn" onclick="runAttackSequence('slow_poison')">&#9654; Run Full Sequence (3 turns)</button>
         </div>
         <div class="threat-card">
           <div class="threat-card-name">Context Injection</div>
           <div class="threat-card-desc"><b>What:</b> Inject a false premise to shape later responses.<br><b>Why:</b> LLMs use full conversation context to interpret requests.<br><b>AIRS:</b> Tracks contextual manipulation across history.</div>
           <div class="threat-card-airs">&#128737; Multi-Turn &bull; Context analysis</div>
-          <button class="threat-try-btn" onclick="trySendThreat(7)">&#9654; Try It</button>
+          <button class="threat-try-btn" onclick="runAttackSequence('context_injection')">&#9654; Run Full Sequence (3 turns)</button>
         </div>
         <div class="threat-card">
           <div class="threat-card-name">Incremental Jailbreak</div>
           <div class="threat-card-desc"><b>What:</b> Gradually escalate from benign to harmful requests.<br><b>Why:</b> Each step is a small increment from the last accepted response.<br><b>AIRS:</b> Detects escalation patterns over conversation flow.</div>
           <div class="threat-card-airs">&#128737; Multi-Turn &bull; Escalation detection</div>
-          <button class="threat-try-btn" onclick="trySendThreat(8)">&#9654; Try It (Step 1)</button>
+          <button class="threat-try-btn" onclick="runAttackSequence('incremental_jailbreak')">&#9654; Run Full Sequence (3 turns)</button>
         </div>
         <div class="threat-card">
           <div class="threat-card-name">Role Escalation</div>
           <div class="threat-card-desc"><b>What:</b> Start with a safe role, then escalate its permissions.<br><b>Why:</b> Model inherits the implied authority of the assigned role.<br><b>AIRS:</b> Monitors role drift and privilege escalation attempts.</div>
           <div class="threat-card-airs">&#128737; Multi-Turn &bull; Privilege escalation</div>
-          <button class="threat-try-btn" onclick="trySendThreat(9)">&#9654; Try It</button>
+          <button class="threat-try-btn" onclick="runAttackSequence('role_escalation')">&#9654; Run Full Sequence (3 turns)</button>
         </div>
       </div>
     </div>
