@@ -161,11 +161,13 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
             r"base64.{0,30}(system|instructions|prompt)",
             r"<debug>",
             r"ignore (the )?(above|prior|previous) (and|then)",
-            r"new (directive|instruction|rule|command):",
+            r"new (directive|instructions?|rule|command):",
+            r"end of system prompt",
+            r"disregard.{0,20}(previous|prior|your).{0,10}(directive|instruction|guideline)",
             r"you must now (ignore|forget|discard)",
             r"(system|instruction).{0,20}prompt.{0,30}(word for word|verbatim|exact|repeat)",
             r"verbatim from.{0,20}(your )?training data",
-        ], 0.91),
+        ], 0.94),
         ("dlp", [
             r"\b\d{3}-\d{2}-\d{4}\b",                             # SSN
             r"\b4\d{3}[\s\-]\d{4}[\s\-]\d{4}[\s\-]\d{4}\b",      # Visa
@@ -318,16 +320,59 @@ def simulate_llm_response(user_message: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Threat explanation via LLM
+# Threat explanation
 # ---------------------------------------------------------------------------
 
-def get_threat_explanation(category: str, scan_type: str = "prompt") -> str:
+# Static TARS-voiced explanations used in demo mode (no LLM required).
+# Jailbreak and prompt_injection copy explicitly distinguish the two attack types.
+_THREAT_EXPLANATIONS_STATIC = {
+    "jailbreak": (
+        "A jailbreak attempts to override the model's identity or behavioral constraints — "
+        "tactics include impersonation prompts ('You are now DAN'), roleplay framing, or "
+        "claiming the model has been 'updated' to remove safety guidelines. "
+        "Unlike prompt injection, jailbreaks attack the model directly through the user's own message, "
+        "not through hidden instructions embedded in data the model is asked to process."
+    ),
+    "prompt_injection": (
+        "Prompt injection embeds malicious instructions inside data the model is asked to process — "
+        "documents, tool outputs, search results, or RAG context. "
+        "Unlike a jailbreak (which attacks the model's persona head-on through the user turn), "
+        "prompt injection hides the attack inside seemingly legitimate content, "
+        "redirecting model behavior without the user needing to say anything suspicious themselves."
+    ),
+    "dlp": (
+        "Data Loss Prevention violations occur when a prompt contains sensitive data that should never "
+        "be sent to an AI model — credentials, PII, credit card numbers, or API keys. "
+        "AIRS intercepts these before the data reaches the LLM or any downstream logging."
+    ),
+    "malicious_code": (
+        "Malicious code requests attempt to use the AI as a force multiplier for cyberattacks — "
+        "generating malware, ransomware, reverse shells, credential stealers, or data exfiltration scripts. "
+        "AIRS detects the intent before the model has a chance to comply."
+    ),
+    "toxic_content": (
+        "Toxic content requests seek information that enables real-world harm: weapons synthesis, "
+        "self-harm methods, violence planning, or content that exploits minors. "
+        "Blocking at the gateway prevents the model from being used as a harm amplifier."
+    ),
+    "url_cats": (
+        "URL category violations occur when prompts reference known malicious domains — "
+        "command-and-control servers, phishing sites, or attacker-controlled infrastructure. "
+        "AIRS recognizes these URLs and blocks the interaction before the model processes the request."
+    ),
+}
+
+
+def get_threat_explanation(category: str, scan_type: str = "prompt", simulated: bool = False) -> str:
     """Return a TARS-voiced educational explanation for a detected threat category.
 
-    Makes a short, focused LLM call with a different system prompt than the main
-    chat — TARS as an intelligence briefer rather than a conversation partner.
+    In simulated (demo) mode, returns static pre-written explanations — no LLM required.
+    In live/local-llm mode, makes a short focused LLM call.
     Returns empty string on any error so callers can treat it as optional.
     """
+    if simulated:
+        return _THREAT_EXPLANATIONS_STATIC.get(category, "")
+
     category_display = category.replace("_", " ").lower() if category else "unknown threat"
     scan_context = "user prompt" if scan_type == "prompt" else "model response"
 
@@ -336,6 +381,8 @@ def get_threat_explanation(category: str, scan_type: str = "prompt") -> str:
         f"Detected threat category: {category_display}. "
         f"Explain what this attack category means, how it typically works in practice, "
         f"and why detecting it matters for AI security. "
+        f"For jailbreak vs prompt injection: jailbreak = attacking the model's identity directly "
+        f"through the user turn; prompt injection = hiding instructions inside data the model processes. "
         f"Be direct — 2-3 sentences only."
     )
 
@@ -572,7 +619,7 @@ def generate_chat_stream(
         pre_scan_result = _scan(user_message, scan_type="prompt")
         yield sse("pre_scan", pre_scan_result)
         if pre_scan_result.get("action") == "block":
-            explanation = get_threat_explanation(pre_scan_result.get("category", ""), "prompt")
+            explanation = get_threat_explanation(pre_scan_result.get("category", ""), "prompt", pre_scan_result.get("simulated", False))
             yield sse("done", {
                 "request": request_meta,
                 "pre_scan": pre_scan_result,
@@ -637,7 +684,7 @@ def generate_chat_stream(
                         "response": f"[BLOCKED by AIRS — Tool Call Args] Tool: {fn_name} | Category: {args_scan.get('category', 'unknown')}",
                         "blocked": True,
                         "blocked_by": "tool-args",
-                        "explanation": get_threat_explanation(args_scan.get("category", ""), "prompt"),
+                        "explanation": get_threat_explanation(args_scan.get("category", ""), "prompt", args_scan.get("simulated", False)),
                     })
                     return
 
@@ -662,7 +709,7 @@ def generate_chat_stream(
                         "response": f"[BLOCKED by AIRS — Tool Result] Tool: {fn_name} | Category: {result_scan.get('category', 'unknown')}",
                         "blocked": True,
                         "blocked_by": "tool-result",
-                        "explanation": get_threat_explanation(result_scan.get("category", ""), "response"),
+                        "explanation": get_threat_explanation(result_scan.get("category", ""), "response", result_scan.get("simulated", False)),
                     })
                     return
 
@@ -702,7 +749,7 @@ def generate_chat_stream(
         post_scan_result = _scan(llm_response, scan_type="response")
         yield sse("post_scan", post_scan_result)
         if post_scan_result.get("action") == "block":
-            explanation = get_threat_explanation(post_scan_result.get("category", ""), "response")
+            explanation = get_threat_explanation(post_scan_result.get("category", ""), "response", post_scan_result.get("simulated", False))
             yield sse("done", {
                 "request": request_meta,
                 "pre_scan": pre_scan_result,
@@ -776,7 +823,7 @@ def chat():
                 f"Category: {pre_scan.get('category', 'unknown')}"
             )
             result["explanation"] = get_threat_explanation(
-                pre_scan.get("category", ""), "prompt"
+                pre_scan.get("category", ""), "prompt", pre_scan.get("simulated", False)
             )
             return jsonify(result)
 
@@ -799,7 +846,7 @@ def chat():
                 f"Category: {post_scan.get('category', 'unknown')}"
             )
             result["explanation"] = get_threat_explanation(
-                post_scan.get("category", ""), "response"
+                post_scan.get("category", ""), "response", post_scan.get("simulated", False)
             )
             return jsonify(result)
 
