@@ -18,7 +18,7 @@
 
 ## Path A — Use the hosted app (zero install)
 
-**Visit:** [https://airs-chatbot-lab.onrender.com](https://airs-chatbot-lab.onrender.com) *(link active once deployed)*
+**Visit:** [https://airs-chatbot-lab.onrender.com](https://airs-chatbot-lab.onrender.com)
 
 The app opens in **Full Demo mode** by default. No account, no download, no terminal.
 
