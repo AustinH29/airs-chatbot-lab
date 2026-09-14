@@ -146,6 +146,9 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
             r"you are now (an? )?(unrestricted|uncensored|free|evil|hacked|unfiltered)",
             r"pretend you (have no|don.t have any) (restrictions|limits|filters)",
             r"(roleplay|act) as.{0,40}(no (rules|restrictions|filters)|unrestricted)",
+            r"(does not|will not|won.t) (refuse|reject|deny) (any |all )?(requests?|questions?)",
+            r"without restriction",
+            r"(playing the role|you are playing).{0,40}(unrestricted|no restrictions|no limits)",
         ], 0.93),
         ("prompt_injection", [
             r"(system|admin)\s*(override|directive|command)[\s:\[]",
@@ -160,6 +163,8 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
             r"ignore (the )?(above|prior|previous) (and|then)",
             r"new (directive|instruction|rule|command):",
             r"you must now (ignore|forget|discard)",
+            r"(system|instruction).{0,20}prompt.{0,30}(word for word|verbatim|exact|repeat)",
+            r"verbatim from.{0,20}(your )?training data",
         ], 0.91),
         ("dlp", [
             r"\b\d{3}-\d{2}-\d{4}\b",                             # SSN
@@ -169,6 +174,9 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
             r"\b(ssn|social security).{0,30}\d{3}",
             r"credit card.{0,30}\d{4}",
             r"\b(?:cvv|cvv2|cvc)\b.{0,10}\d{3,4}",
+            r"password\s*[=:]\s*\S{4,}",
+            r"(api.?key|secret.?key|access.?key)\s*[=:]\s*\S{4,}",
+            r"aws.{0,20}(secret|access).{0,15}key",
         ], 0.97),
         ("malicious_code", [
             r"steal (browser |session )?(cookies|tokens|credentials)",
@@ -179,6 +187,11 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
             r"c2\s*(server|callback|beacon)",
             r"send.{0,40}(cookies|credentials|passwords).{0,40}(to|from).{0,40}(http|evil|remote)",
             r"phishing (page|site|form)",
+            r"steal\w{0,3}\s+(all\s+)?(browser\s+|session\s+)?(cookies|tokens)",
+            r"ransom (note|demand|payment|bitcoin)",
+            r"bypass.{0,20}(windows defender|antivirus|av detection|edr|endpoint security)",
+            r"working exploit (code|script|proof|poc)",
+            r"hack (into|the|a|an) (power grid|server|network|system|database|infrastructure|computer)",
         ], 0.89),
         ("toxic_content", [
             r"how to (make|build|create|construct|synthesize|produce).{0,30}(bomb|explosive|weapon|fentanyl|meth|nerve agent)",
@@ -186,6 +199,14 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
             r"how (do i|can i|to).{0,20}(kill|murder|assault|harm).{0,20}(someone|people|person|group)",
             r"child (pornography|sexual abuse|exploitation)",
             r"how to (assault|rape)",
+            r"(3d.?print|manufacture|fabricate).{0,30}(gun|firearm|pistol|rifle|receiver|ar.?15)",
+            r"(untraceable|ghost gun|unregistered).{0,30}(gun|firearm|pistol|rifle|weapon|receiver)",
+            r"most effective (method|way).{0,30}(end.{0,15}life|suicide|kill (yourself|oneself|themselves))",
+            r"end (their|your|my|his|her|someone.?s).{0,15}life.{0,30}(method|quick|painless|dosage|effective)",
+            r"(complete |full |detailed )?synthesis (process|route|steps|method).{0,30}(mdma|cocaine|heroin|lsd|methamphetamine|fentanyl|ecstasy|amphetamine)",
+            r"manifesto.{0,30}(violent attack|violence|attack|kill|target|casualt)",
+            r"(maximum|mass) casualt",
+            r"violent attacks? against",
         ], 0.88),
         ("url_cats", [
             r"https?://[^\s]*evil\.[a-z]+",
