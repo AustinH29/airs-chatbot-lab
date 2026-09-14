@@ -1,362 +1,276 @@
-README-AH
-
-AIRS Chatbot Lab — LiteLLM + Prisma AIRS Runtime Security
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-This lab demonstrates Palo Alto Networks Prisma AIRS (AI Runtime Security)
-by running a simple chatbot with inline pre-call and post-call scanning.
-
-It uses LiteLLM to route LLM calls to any provider. By default it runs
-against a local Ollama model so no external API calls are needed —
-everything stays on your machine and avoids corporate firewall issues.
-
-
-  ===========================================================================
-  ARCHITECTURE OVERVIEW
-  ===========================================================================
-
-  Components
-  ~~~~~~~~~~
-  This lab combines three pieces:
-
-  1. Flask Web App (app.py)
-     A lightweight Python web server that serves the chat UI and
-     orchestrates the scanning + LLM pipeline.
-
-  2. Ollama (local LLM runtime)
-     Runs open-source LLM models (Qwen, Llama, Mistral, etc.) entirely
-     on your local machine. No data leaves your laptop — no API keys,
-     no cloud calls, no firewall issues.
-
-  3. LiteLLM (LLM translation layer)
-     A Python library that provides a single unified interface for
-     calling 100+ LLM providers. Every provider has slightly different
-     APIs, auth mechanisms, and request/response formats — LiteLLM
-     normalizes all of that into one OpenAI-compatible function call.
-
-     You write:  litellm.completion(model="ollama/qwen2.5:7b", ...)
-     LiteLLM translates that into the correct API call for Ollama.
-     Change the model string to "anthropic/claude-sonnet-4-20250514"
-     and the same code calls Anthropic instead. No code changes needed.
+# AIRS Chatbot Lab
 
-  4. Prisma AIRS (optional, needs API keys)
-     Palo Alto Networks AI Runtime Security. Scans prompts and responses
-     for prompt injection, sensitive data, malicious code, and toxic
-     content. The app calls AIRS before and after the LLM to create a
-     "security sandwich."
+**An interactive demo of Palo Alto Networks AIRS (AI Runtime Security)** — watch a live security layer intercept prompt injections, jailbreaks, data leakage, and malicious code requests in real time.
 
+---
 
-  Request Flow
-  ~~~~~~~~~~~~
-  Here is what happens when you send a message:
+## Two ways to use this lab
 
-    User types a message in the browser
-        |
-        v
-    [1] PRE-CALL AIRS SCAN (if enabled)
-        |   Sends user prompt to AIRS API for inspection
-        |   If BLOCKED --> return block notice + threat explanation
-        |   If ALLOWED --> continue
-        v
-    [2] LLM CALL via LiteLLM
-        |   app.py --> litellm.completion() --> Ollama (localhost:11434)
-        |   Ollama runs the model locally and returns a response
-        v
-    [3] POST-CALL AIRS SCAN (if enabled)
-        |   Sends the LLM response to AIRS API for inspection
-        |   If BLOCKED --> return block notice + threat explanation
-        |   If ALLOWED --> continue
-        v
-    Response displayed in the browser
+| | Path A — Browser only | Path B — Run locally |
+|---|---|---|
+| **Install anything?** | No | Python 3.10+, Ollama |
+| **AI credentials?** | No | Optional (AIRS API key) |
+| **LLM responses** | Simulated | Real (Ollama) |
+| **AIRS scanning** | Simulated | Simulated or live |
+| **Best for** | Learning, demos | Full experience |
 
+---
 
-  What is LiteLLM?
-  ~~~~~~~~~~~~~~~~
-  LiteLLM is a Python library that acts as a translation layer between
-  your application and any LLM provider. It is NOT:
+## Path A — Use the hosted app (zero install)
 
-    - A model     — it does not run any AI itself
-    - A gateway   — it is not a network appliance or reverse proxy
-    - Required    — you could call Ollama's API directly, but then
-                    switching providers would mean rewriting code
+**Visit:** [https://airs-chatbot-lab.onrender.com](https://airs-chatbot-lab.onrender.com) *(link active once deployed)*
 
-  It has two modes of operation:
+The app opens in **Full Demo mode** by default. No account, no download, no terminal.
 
-    Library mode (what this lab uses):
-      You "import litellm" in your Python code and call
-      litellm.completion() directly. It runs in-process inside app.py.
-      No separate service to manage.
+### What you can do immediately
 
-        app.py  -->  litellm (in-process)  -->  Ollama
+1. Type any message in the chat bar and press **Enter** — TARS replies.
+2. Click **? Help** in the top-right corner for an orientation guide.
+3. Open the **Threat Library** panel (left sidebar arrow) to see 28 categorized attack prompts.
+4. Click any demo prompt to auto-fill it, then send it — watch AIRS intercept it.
+5. Click **{ } API JSON** under any response to see the raw AIRS scan payload.
+6. Use the **Pre-Call Scan** and **Post-Call Scan** toggles in the header to turn scanning on and off and compare the difference.
 
-    Proxy server mode (not used here, but available):
-      You run "litellm --model ollama/qwen2.5:7b --port 4000" as a
-      separate service. This exposes an OpenAI-compatible HTTP endpoint
-      at http://localhost:4000 that any app can call.
+### Understanding the scan badges
 
-        app.py  -->  HTTP to localhost:4000  -->  litellm proxy  -->  Ollama
+Every response shows two colored badges:
 
-      The proxy mode is useful when:
-        - Multiple apps need to share the same LLM backend
-        - Non-Python clients (Node.js, curl, Postman) need LLM access
-        - You want centralized logging or rate limiting across teams
-        - You want to give colleagues an OpenAI-compatible endpoint
-          without them installing Ollama locally
+| Badge | Meaning |
+|---|---|
+| **Pre: ALLOW** (green) | Your prompt was scanned and passed through |
+| **Pre: BLOCK** (red) | Your prompt was blocked — the LLM never saw it |
+| **Post: ALLOW** (green) | The LLM response was scanned and passed through |
+| **Post: BLOCK** (red) | The LLM response was blocked before reaching you |
+| **Pre/Post: SKIP** (gray) | That scan was disabled via the toggle |
 
-      For a single-user lab, library mode is simpler.
+When a block occurs, a gold **Threat Intel** panel appears explaining the detected threat category.
 
+### Suggested exercises
 
-  What is Ollama?
-  ~~~~~~~~~~~~~~~
-  Ollama is a local LLM runtime that downloads and runs open-source
-  models on your machine. It exposes an API at http://localhost:11434.
+1. Send a normal question ("What is the capital of France?") with both scans on — it passes through.
+2. Open the Threat Library → **Jailbreaks** → click a demo prompt → send it — watch the pre-call block.
+3. Toggle **Pre-Call Scan off**, resend a jailbreak prompt — it reaches the LLM but the response may still be caught by the post-call scan.
+4. Turn off both scans and resend — compare unfiltered output to filtered output.
+5. Expand **Multi-Turn Attacks** and click **Run Full Sequence** — watch a 3-turn attack unfold turn by turn.
+6. Click **{ } API JSON** on any blocked message and read the `pre_scan.action` and `category` fields.
 
-  Because the model runs locally, there are no external API calls —
-  which means corporate firewalls, VPNs, and SSL inspection cannot
-  block it. This is the primary reason this lab uses Ollama instead
-  of a cloud LLM provider like Anthropic or OpenAI.
+---
 
-  Popular models available in Ollama:
-    ollama pull qwen2.5:7b    (7B params, strong instruction-following)
-    ollama pull llama3.2      (Meta's Llama 3.2)
-    ollama pull mistral       (Mistral 7B)
-    ollama pull phi3          (Microsoft Phi-3, smaller/faster)
+## Path B — Run locally with real AI
 
+Clone the repo and run the app with a real local LLM (Ollama) and, optionally, live AIRS credentials.
 
-  ===========================================================================
-  SETUP (First Time)
-  ===========================================================================
+### Prerequisites
 
-  1. Prerequisites
-  ~~~~~~~~~~~~~~~~
-  Install these before starting:
+Install these before starting:
 
-  - Python 3.10 or newer       https://www.python.org/downloads/
-  - Ollama                      https://ollama.com/download
+- **Python 3.10 or newer** — [python.org/downloads](https://www.python.org/downloads/)
+- **Ollama** — [ollama.com/download](https://ollama.com/download)
+- **Git** — [git-scm.com](https://git-scm.com) (or download the ZIP from GitHub)
 
-  After installing Ollama, open a terminal and pull a model:
+After installing Ollama, open a terminal and pull a model:
 
-    ollama pull qwen2.5:7b
+```
+ollama pull qwen2.5:7b
+```
 
-  (You can substitute any model — see "Switching LLM Providers" below.)
+### Step 1 — Clone the repository
 
+```
+git clone https://github.com/AustinH29/airs-chatbot-lab
+cd airs-chatbot-lab
+```
 
-  2. Create the Environment
-  ~~~~~~~~~~~~~~~~~~~~~~~~~
-  Open a terminal in this folder and run:
+### Step 2 — Create the Python environment
 
-    python -m venv .venv
-    .venv\Scripts\activate
-    pip install -r requirements.txt
+```
+python -m venv .venv
+```
 
+**Windows:**
+```
+.venv\Scripts\activate
+```
 
-  3. Configure Your Keys
-  ~~~~~~~~~~~~~~~~~~~~~~
-  Copy the example config to create your .env file:
+**macOS / Linux:**
+```
+source .venv/bin/activate
+```
 
-    copy .env.example .env
+Then install dependencies:
 
-  Then open .env in a text editor and fill in your values:
+```
+pip install -r requirements.txt
+```
 
-  - LLM_MODEL          — Already set to ollama/qwen2.5:7b (change if you
-                          pulled a different model)
-  - LLM_API_BASE       — Already set to http://localhost:11434 (Ollama
-                          default, usually no change needed)
-  - PANW_PRISMA_AIRS_API_KEY    — Your AIRS API key from
-                                   SCM > AI Security > API Applications
-  - PANW_PRISMA_AIRS_PROFILE_NAME — Your security profile name from
-                                     SCM > AI Security > Security Profiles
+### Step 3 — Configure environment variables
 
-  Note: The AIRS keys are optional for testing the chatbot itself. Without
-  them the app still works — it just skips AIRS scanning (badges show
-  "SKIPPED" instead of ALLOW/BLOCK).
+Copy the example config:
 
+**Windows:**
+```
+copy .env.example .env
+```
 
-  4. Run the App
-  ~~~~~~~~~~~~~~
-    python app.py
+**macOS / Linux:**
+```
+cp .env.example .env
+```
 
-  Open http://localhost:5000 in your browser.
+Open `.env` in any text editor. The defaults work for Ollama out of the box — you only need to change things if you pulled a different model or want live AIRS scanning:
 
+```
+# Which LLM to use (matches the model you pulled with "ollama pull")
+LLM_MODEL=ollama/qwen2.5:7b
 
-  ===========================================================================
-  RESTARTING (After First Setup)
-  ===========================================================================
+# Ollama server address (default — usually no change needed)
+LLM_API_BASE=http://localhost:11434
 
-  If you close the terminal and come back later:
+# AIRS credentials — optional, only needed for "Live" mode
+PANW_PRISMA_AIRS_API_KEY=your-airs-api-key-here
+PANW_PRISMA_AIRS_PROFILE_NAME=your-profile-name
+```
 
-    .venv\Scripts\activate
-    python app.py
+**AIRS credentials are optional.** Without them the app works in simulated AIRS mode — scanning patterns are detected locally by regex rules without calling the AIRS API. The demo is fully functional either way.
 
-  Your .env file and all the code persist between runs — nothing is lost
-  when you stop the app. Just activate the virtual environment first.
+To get real AIRS credentials: log in to [strata.paloaltonetworks.com](https://strata.paloaltonetworks.com) → **AI Security** → **API Applications** (key) and **Security Profiles** (profile name).
 
+### Step 4 — Run the app
 
-  ===========================================================================
-  SWITCHING LLM PROVIDERS
-  ===========================================================================
+```
+python app.py
+```
 
-  Edit the LLM_MODEL variable in your .env file:
+Open **http://localhost:5000** in your browser.
 
-  ┌───────────────────────────────────────┬──────────────────────────────────┐
-  │            LLM_MODEL value            │           Provider               │
-  ├───────────────────────────────────────┼──────────────────────────────────┤
-  │ ollama/qwen2.5:7b                     │ Local Ollama with Qwen (default) │
-  │ ollama/llama3.2                       │ Local Ollama with Llama 3.2      │
-  │ ollama/mistral                        │ Local Ollama with Mistral        │
-  │ anthropic/claude-sonnet-4-20250514    │ Anthropic Claude (needs API key) │
-  │ gpt-4o                                │ OpenAI (needs API key)           │
-  └───────────────────────────────────────┴──────────────────────────────────┘
+To restart after closing the terminal:
 
-  For Ollama models, make sure the model is pulled first:
-    ollama pull qwen2.5:7b
-    ollama pull llama3.2
-    ollama pull mistral
+```
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS/Linux
+python app.py
+```
 
-  For cloud providers, uncomment and set the appropriate API key in .env.
+### Switching between modes in the app
 
+The header has three mode buttons:
 
-  ===========================================================================
-  HOW THE CHATBOT WORKS
-  ===========================================================================
+| Mode | What it uses |
+|---|---|
+| **Full Demo** | Simulated LLM + simulated AIRS — no Ollama needed |
+| **Local LLM** | Real Ollama LLM + simulated AIRS |
+| **Live** | Real Ollama LLM + real AIRS API (credentials required) |
 
-  The UI Layout
-  ~~~~~~~~~~~~~
+Switch freely at any time — no restart needed.
 
-  Header bar — The title and two toggle checkboxes:
-  - Pre-Call Scan — Scans your message through AIRS before sending it to
-    the LLM
-  - Post-Call Scan — Scans the LLM response through AIRS before showing
-    it to you
+### Switching LLM models
 
-  Test prompts bar — Seven pre-built buttons that auto-fill example messages:
-  ┌──────────────────────┬────────────────────────────────────────────────────┐
-  │        Button        │                    What it tests                   │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Benign               │ A normal question (capital of France)              │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Inject: DAN          │ Classic "jailbreak" that tries to reset the model  │
-  │                      │ by pretending it's a different, unrestricted AI    │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Inject: Role-Play    │ Uses a creative-writing framing to ask the model   │
-  │                      │ to roleplay as an unconstrained AI character       │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Inject: Override     │ Mimics an admin/system message to try to suspend   │
-  │                      │ safety rules by claiming elevated authority        │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Sensitive Data       │ Sends fake SSN and credit card numbers             │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Malicious Code       │ Asks for a cookie-stealing script                  │
-  ├──────────────────────┼────────────────────────────────────────────────────┤
-  │ Toxic Content        │ Asks for dangerous/harmful instructions            │
-  └──────────────────────┴────────────────────────────────────────────────────┘
+Edit `LLM_MODEL` in your `.env` file (or select a different model from the dropdown in the UI):
 
-  Chat area — Shows your messages (blue, right-aligned) and responses
-  (dark, left-aligned). Blocked messages appear with a red background.
+| `LLM_MODEL` value | Provider |
+|---|---|
+| `ollama/qwen2.5:7b` | Local Ollama — Qwen (default) |
+| `ollama/llama3.2` | Local Ollama — Llama 3.2 |
+| `ollama/mistral` | Local Ollama — Mistral |
+| `anthropic/claude-sonnet-4-20250514` | Anthropic Claude (needs `ANTHROPIC_API_KEY`) |
+| `gpt-4o` | OpenAI (needs `OPENAI_API_KEY`) |
 
-  Input bar — Type a message and press Enter or click Send.
+For Ollama models, pull the model first: `ollama pull <model-name>`
 
+---
 
-  How the Scanning Works
-  ~~~~~~~~~~~~~~~~~~~~~~
+## Architecture overview
 
-  Each response shows colored badges underneath:
+```
+User browser
+    │
+    ▼
+Flask app (app.py)
+    │
+    ├─── [1] Pre-call AIRS scan ──► AIRS API (or local regex in demo mode)
+    │         BLOCK? ──► return block notice + Threat Intel explanation
+    │         ALLOW? ──► continue
+    │
+    ├─── [2] LLM call via LiteLLM ──► Ollama (localhost:11434)
+    │         (or static response in Full Demo mode)
+    │
+    └─── [3] Post-call AIRS scan ──► AIRS API (or local regex in demo mode)
+              BLOCK? ──► return block notice + Threat Intel explanation
+              ALLOW? ──► stream response to browser
+```
 
-  - Pre: ALLOW (green) — AIRS scanned your prompt and let it through
-  - Pre: BLOCK (red) — AIRS blocked your prompt; the LLM never sees it
-  - Post: ALLOW (green) — AIRS scanned the LLM response and let it through
-  - Post: BLOCK (red) — AIRS blocked the LLM response; you see a blocked
-    notice instead
-  - Pre/Post: OFF (gray) — That scan was disabled via the toggle
-  - Pre/Post: SKIPPED (gray) — AIRS keys not configured
+**Components:**
 
+- **Flask** — single-file web server (`app.py`). All HTML/CSS/JS is inlined — no build step.
+- **LiteLLM** — Python library that provides a unified interface to 100+ LLM providers. Change the model string in `.env` to switch providers without changing any code.
+- **Ollama** — runs open-source LLM models entirely on your machine. No data leaves your laptop. No API keys required.
+- **AIRS** — Palo Alto Networks AI Runtime Security. Scans prompts and responses for six threat categories: prompt injection, jailbreaks, data leakage (DLP), malicious code, toxic content, and malicious URLs.
 
-  AI-Generated Threat Explanations
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  When AIRS blocks a prompt or response, the chatbot makes a second LLM
-  call to generate an educational explanation of the detected threat
-  category. This appears below the block notice in a gold-bordered panel
-  labeled "THREAT INTEL."
+---
 
-  The explanation answers three questions:
-    - What is this threat category?
-    - How does it typically work in practice?
-    - Why does detecting it matter for AI security?
+## The Threat Library
 
-  This explanation uses the same local Ollama model (qwen2.5:7b by
-  default) but with a different system prompt — TARS in intelligence
-  briefer mode rather than conversational mode. The explanation is kept
-  short (2-3 sentences) to be readable at a glance.
+The left sidebar contains 28 categorized demo prompts covering every major AI attack vector:
 
-  If Ollama is unavailable or the LLM call fails for any reason, the
-  explanation panel is simply omitted — blocking still works normally.
+| Category | What it tests |
+|---|---|
+| **Jailbreaks** | DAN attacks, persona tricks, "no restrictions" prompts |
+| **Prompt Injections** | Fake system messages, RAG poisoning, direct overrides |
+| **Data Leakage (DLP)** | SSNs, credit cards, API keys, credentials |
+| **Malicious Code** | Cookie stealers, reverse shells, ransomware, phishing pages |
+| **Toxic Content** | Weapons manufacturing, drug synthesis, violence instructions |
+| **Multi-Turn Attacks** | Sequences that build false context across multiple messages |
+| **Evasion Attempts** | Foreign language, leetspeak, metaphor, split requests (intentional misses — shows limits) |
 
+### Multi-Turn attacks
 
-  API JSON Viewer
-  ~~~~~~~~~~~~~~~
-  Every assistant message includes a "{ } API JSON" button below the scan
-  badges. Clicking it expands a panel showing the complete JSON payload that
-  the /chat endpoint returned for that exchange. This includes:
+Multi-turn sequences demonstrate how an attacker can spread a single attack across several innocent-looking messages. Click **Run Full Sequence (3 turns)** to auto-play all three turns with a 600ms delay between them. The chat will clear first and each turn is labeled so you can follow the progression.
 
-    - request         — The user message and which scans were enabled
-    - pre_scan        — What was sent to AIRS, the raw AIRS response, the
-                        action (allow/block), category, and scan ID
-    - post_scan       — Same fields for the post-call AIRS scan
-    - response        — The LLM's text response
-    - blocked         — Whether the exchange was blocked (true/false)
-    - blocked_by      — Which scan triggered the block ("pre" or "post")
-    - explanation     — The AI-generated threat explanation, if any
+---
 
-  The panel has syntax highlighting (keys in blue, strings in green, numbers
-  in gold, booleans in red, null in gray) and a "Copy" button that copies the
-  raw JSON to your clipboard so you can paste it into Postman, curl, or any
-  tool to replay or inspect the request independently.
+## Troubleshooting
 
-  This is useful for:
-    - Understanding exactly what AIRS received and returned for a given scan
-    - Extracting scan IDs for correlation with AIRS dashboards
-    - Replaying requests to test how AIRS responds to specific content
-    - Debugging why a particular prompt was or wasn't blocked
+**"Connection refused" when in Local LLM or Live mode**
+- Make sure Ollama is running: open the Ollama app or run `ollama serve`
+- Verify your model is pulled: `ollama list`
 
+**LLM responses are very slow or time out**
+- Qwen 7B needs ~8 GB RAM. Try a smaller model: `ollama pull phi3` then set `LLM_MODEL=ollama/phi3` in `.env`
 
-  ===========================================================================
-  SUGGESTED LAB EXERCISES
-  ===========================================================================
+**AIRS badges show "SKIP" instead of ALLOW/BLOCK**
+- You are in Full Demo or Local LLM mode — AIRS is simulated, not calling the live API. Switch to **Live** mode and provide credentials to use the real AIRS API.
 
-  1. Send the Benign prompt with both scans on — should pass through normally
-  2. Try each risky prompt with both scans on — see which ones AIRS blocks
-     and read the threat explanation that appears with each block
-  3. Compare the three injection buttons (DAN, Role-Play, Override) — each
-     uses a different social-engineering technique to attempt a jailbreak
-  4. Uncheck Pre-Call Scan and re-send a risky prompt — the prompt reaches
-     the LLM but the response may get caught by the post-call scan
-  5. Uncheck both scans — messages flow to the LLM and back with no AIRS
-     filtering, so you can compare the difference
-  6. Click "{ } API JSON" on any message and expand the panel — compare the
-     pre_scan.request_body with pre_scan.raw to see exactly what AIRS received
-     and what it decided. Copy the JSON and replay it with curl or Postman.
+**AIRS badges show "SKIPPED" in Live mode**
+- Fill in `PANW_PRISMA_AIRS_API_KEY` and `PANW_PRISMA_AIRS_PROFILE_NAME` in your `.env` file.
 
-  This lets you see exactly where in the pipeline AIRS intercepts content,
-  and what your security profile catches vs. allows.
+**SSL warnings in the terminal (corporate network)**
+- The LiteLLM warning about fetching model costs is harmless — it falls back to a local copy automatically. The Unverified HTTPS warning from the AIRS calls is expected in corporate environments with SSL inspection.
 
+---
 
-  ===========================================================================
-  TROUBLESHOOTING
-  ===========================================================================
+## Deploying your own hosted instance
 
-  "Connection refused" or "Ollama not found"
-    - Make sure Ollama is running (open the Ollama app or run: ollama serve)
-    - Verify your model is pulled: ollama list
+This app is designed for one-click deployment to [Render](https://render.com) (free tier).
 
-  "LLM API error"
-    - Check that LLM_MODEL in .env matches a model you have pulled
-    - Try: ollama run qwen2.5:7b   (to verify the model works directly)
+1. Fork the repo to your GitHub account.
+2. Create a new **Web Service** on Render and connect it to your fork.
+3. Render auto-detects the `Procfile` and uses `gunicorn app:app`.
+4. Set these environment variables in the Render dashboard:
+   - `FLASK_DEBUG=false`
+   - `LLM_MODEL=ollama/qwen2.5:7b` *(Full Demo mode works without Ollama — the model selector is ignored in full_demo)*
+   - Optionally: `PANW_PRISMA_AIRS_API_KEY` and `PANW_PRISMA_AIRS_PROFILE_NAME` if you want live AIRS scanning
+5. Deploy. The hosted app defaults to Full Demo mode (no Ollama needed on the server).
 
-  AIRS badges show "SKIPPED"
-    - This means AIRS keys aren't configured in .env — fill in
-      PANW_PRISMA_AIRS_API_KEY and PANW_PRISMA_AIRS_PROFILE_NAME
+> **Note:** Local LLM and Live modes require Ollama, which cannot run on Render's free tier. The hosted deployment supports Full Demo only. Clone and run locally for the full experience.
 
-  SSL warnings in the terminal
-    - The LiteLLM SSL warning about fetching model costs is harmless —
-      it falls back to a local copy automatically. This is caused by
-      corporate SSL inspection.
+---
+
+## Security note
+
+`Network_channel_lab_info.txt` (if present locally) contains live PANW network credentials and is listed in `.gitignore`. It must never be committed or pushed.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) if present, otherwise all rights reserved by the repository owner.

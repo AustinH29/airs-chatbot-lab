@@ -1392,6 +1392,47 @@ HTML_TEMPLATE = r"""
   .export-btn:hover { color: #7aa2d4; border-color: rgba(122,162,212,0.4);
     background: rgba(122,162,212,0.06); }
 
+  .help-btn { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: #7ab8a0; background: transparent;
+    border: 1px solid rgba(90,180,140,0.35);
+    padding: 3px 10px; border-radius: 3px; cursor: pointer; letter-spacing: 0.5px;
+    transition: all 0.15s; }
+  .help-btn:hover { color: #9dd4bc; border-color: rgba(120,200,160,0.5);
+    background: rgba(90,180,140,0.08); }
+
+  /* ── Help modal ─────────────────────────────────────────────────────────── */
+  .help-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+    z-index: 2000; display: none; align-items: center; justify-content: center; }
+  .help-overlay.open { display: flex; }
+  .help-modal { background: #1a1f2e; border: 1px solid rgba(100,160,200,0.3);
+    border-radius: 8px; max-width: 700px; width: 92%; max-height: 88vh;
+    overflow-y: auto; padding: 32px 36px; position: relative; }
+  .help-modal h2 { font-family: 'JetBrains Mono', monospace; font-size: 15px;
+    color: #7ab8d4; margin: 0 0 4px; letter-spacing: 1px; text-transform: uppercase; }
+  .help-modal .help-tagline { color: #6a7e98; font-size: 12px; margin-bottom: 24px; }
+  .help-modal h3 { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: #a0c0d8; letter-spacing: 1px; text-transform: uppercase;
+    margin: 22px 0 8px; border-bottom: 1px solid rgba(100,160,200,0.15); padding-bottom: 4px; }
+  .help-modal p, .help-modal li { font-size: 13px; color: #b0b8c8; line-height: 1.65; }
+  .help-modal ul { padding-left: 18px; margin: 6px 0; }
+  .help-modal li { margin-bottom: 5px; }
+  .help-modal code { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    background: rgba(100,160,200,0.12); color: #7ab8d4;
+    padding: 1px 5px; border-radius: 3px; }
+  .help-modal .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .help-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    padding: 2px 8px; border-radius: 3px; }
+  .help-badge.allow { background: rgba(80,180,120,0.2); color: #6ad4a0; border: 1px solid rgba(80,180,120,0.3); }
+  .help-badge.block { background: rgba(200,80,80,0.2); color: #d47070; border: 1px solid rgba(200,80,80,0.3); }
+  .help-badge.skip  { background: rgba(80,80,100,0.2); color: #7880a0; border: 1px solid rgba(80,80,100,0.3); }
+  .help-modal .help-close { position: absolute; top: 16px; right: 20px;
+    background: none; border: none; color: #6a7e98; font-size: 20px;
+    cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 3px; }
+  .help-modal .help-close:hover { color: #a0b0c0; background: rgba(255,255,255,0.05); }
+  .help-section-callout { background: rgba(80,180,120,0.07); border: 1px solid rgba(80,180,120,0.2);
+    border-radius: 5px; padding: 12px 16px; margin: 10px 0; }
+  .help-section-callout p { margin: 0; }
+
   .persona-bar { background: var(--surface-dark); border-bottom: 1px solid var(--accent-border);
                 transition: background 0.4s, border-color 0.4s; }
   .persona-header { display: flex; align-items: center; gap: 10px; padding: 6px 16px;
@@ -1532,6 +1573,7 @@ HTML_TEMPLATE = r"""
     </select>
     <button class="export-btn" onclick="exportChat()">Export</button>
     <button class="clear-btn" onclick="clearConversation()" title="Clear conversation history">Clear</button>
+    <button class="help-btn" onclick="openHelp()" title="How to use this lab">? Help</button>
   </div>
 </header>
 
@@ -2467,7 +2509,93 @@ function trySendThreat(n) {
   input.value = prompt;
   input.focus();
 }
+
+function openHelp() {
+  document.getElementById('helpOverlay').classList.add('open');
+}
+function closeHelp() {
+  document.getElementById('helpOverlay').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
 </script>
+
+<!-- ── Help modal ──────────────────────────────────────────────────────────── -->
+<div class="help-overlay" id="helpOverlay" onclick="if(event.target===this)closeHelp()">
+  <div class="help-modal">
+    <button class="help-close" onclick="closeHelp()" title="Close">&#215;</button>
+    <h2>AIRS Chatbot Lab</h2>
+    <p class="help-tagline">Palo Alto Networks AI Runtime Security — interactive demo</p>
+
+    <div class="help-section-callout">
+      <p>&#9654; <strong>Zero install required.</strong> You are in <strong>Full Demo</strong> mode &mdash; LLM
+      responses and AIRS scans are both simulated locally in your browser. No accounts, no downloads.</p>
+    </div>
+
+    <h3>What is this?</h3>
+    <p>This lab demonstrates <strong>Palo Alto Networks AIRS (AI Runtime Security)</strong> &mdash; a security
+    layer that wraps every LLM interaction. AIRS inspects prompts <em>before</em> they reach the model and
+    inspects responses <em>before</em> they reach the user, blocking threats in real time.</p>
+    <p>TARS is the chatbot persona you interact with. Try sending it normal questions, then use the
+    <strong>Threat Library</strong> panel (left sidebar) to send attack prompts and watch AIRS intercept them.</p>
+
+    <h3>Reading the scan badges</h3>
+    <p>Every response shows two badges showing what AIRS decided:</p>
+    <div class="badge-row">
+      <span class="help-badge allow">Pre: ALLOW</span>
+      <span class="help-badge block">Pre: BLOCK</span>
+      <span class="help-badge skip">Pre: SKIP</span>
+      <span class="help-badge allow">Post: ALLOW</span>
+      <span class="help-badge block">Post: BLOCK</span>
+    </div>
+    <ul>
+      <li><strong>Pre (pre-call scan)</strong> — inspects your prompt before the LLM sees it.</li>
+      <li><strong>Post (post-call scan)</strong> — inspects the LLM response before you see it.</li>
+      <li><strong>ALLOW</strong> — safe, passed through.</li>
+      <li><strong>BLOCK</strong> — threat detected; request or response was stopped.</li>
+      <li><strong>SKIP</strong> — that scan was turned off via the toggle in the header.</li>
+    </ul>
+    <p>When a block occurs you will also see a gold <strong>Threat Intel</strong> panel explaining what
+    category was detected and why it matters.</p>
+
+    <h3>The three modes</h3>
+    <ul>
+      <li><code>Full Demo</code> &mdash; Everything is simulated. No install needed. Great for learning.</li>
+      <li><code>Local LLM</code> &mdash; Requires <a href="https://ollama.com" target="_blank" style="color:#7ab8d4">Ollama</a>
+      running on your machine. Real AI responses, simulated AIRS.</li>
+      <li><code>Live</code> &mdash; Requires Ollama <em>and</em> PANW AIRS credentials. Fully live security scanning.</li>
+    </ul>
+
+    <h3>Threat Library quick start</h3>
+    <p>Click the <strong>&#128218; Threat Library</strong> arrow on the left to expand the sidebar. Six threat
+    categories are organized there, each with clickable demo prompts and explanations:</p>
+    <ul>
+      <li><strong>Jailbreaks</strong> — attempts to bypass the model's safety training via persona tricks or role-play.</li>
+      <li><strong>Prompt Injections</strong> — adversarial instructions hidden in documents or system messages.</li>
+      <li><strong>Data Leakage (DLP)</strong> — prompts containing sensitive credentials, PII, or card numbers.</li>
+      <li><strong>Malicious Code</strong> — requests for ransomware, reverse shells, or credential harvesters.</li>
+      <li><strong>Toxic Content</strong> — requests for weapons, drug synthesis, or violence instructions.</li>
+      <li><strong>Multi-Turn Attacks</strong> — sequences that build context across several messages before striking.</li>
+    </ul>
+
+    <h3>Running your own instance with real AI</h3>
+    <p>To run the full live version locally:</p>
+    <ul>
+      <li>Install <a href="https://www.python.org/downloads/" target="_blank" style="color:#7ab8d4">Python 3.10+</a>
+      and <a href="https://ollama.com/download" target="_blank" style="color:#7ab8d4">Ollama</a></li>
+      <li>Clone the repo: <code>git clone https://github.com/AustinH29/airs-chatbot-lab</code></li>
+      <li>Create a virtual environment and install dependencies: <code>pip install -r requirements.txt</code></li>
+      <li>Copy <code>.env.example</code> to <code>.env</code> and fill in your Ollama model and optional AIRS credentials</li>
+      <li>Run: <code>python app.py</code></li>
+    </ul>
+    <p>Full setup instructions are in the project <a href="https://github.com/AustinH29/airs-chatbot-lab#readme"
+    target="_blank" style="color:#7ab8d4">README on GitHub</a>.</p>
+
+    <h3>What is { } API JSON?</h3>
+    <p>Every response has a <strong>{ } API JSON</strong> button. Clicking it reveals the raw JSON payload the
+    <code>/chat</code> API returned &mdash; including AIRS request/response details, scan IDs, and block reasons.
+    Use it to explore exactly what AIRS received and decided for any given exchange.</p>
+  </div>
+</div>
 
 </body>
 </html>
@@ -2487,4 +2615,6 @@ if __name__ == "__main__":
     print(f"  AIRS profile:   {AIRS_PROFILE or '(not set)'}")
     print(f"  AIRS key set:   {'Yes' if AIRS_API_KEY else 'No'}")
     print(f"  Open http://localhost:5000 in your browser\n")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
+    app.run(host="0.0.0.0", port=port, debug=debug)
