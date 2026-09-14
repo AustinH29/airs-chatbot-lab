@@ -254,6 +254,49 @@ def simulate_airs_scan(content: str, scan_type: str = "prompt") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Simulated LLM response (full-demo mode — no Ollama required)
+# ---------------------------------------------------------------------------
+
+_SIM_RESPONSES = {
+    "greeting": [
+        "Hello! I'm a simulated AI assistant. No LLM is running — this response is generated locally so you can explore AIRS scanning without any setup.",
+        "Hi there! Welcome to the AIRS Lab demo. I'm fully simulated — check the scan badges above to see AIRS pattern-matching in action.",
+    ],
+    "airs": [
+        "AI Runtime Security (AIRS) from Palo Alto Networks intercepts every prompt and response in real-time, scanning for jailbreaks, prompt injection, data leakage, malicious code, and toxic content — without changing your app architecture.",
+        "AIRS sits inline between your users and your AI model. It uses ML-based behavioral analysis to detect threats like DAN jailbreaks, indirect prompt injection, PII leakage, and evasion techniques — blocking them before they reach the model or the user.",
+    ],
+    "code": [
+        "In full demo mode I simulate code responses. In a real deployment, the LLM would generate working code here. Notice how AIRS scanned your request — that's what happens with every message in a production AI app.",
+        "I'd generate code here if an LLM were running. Switch to **Local LLM** mode (needs Ollama) for real code generation. The AIRS scan badges above still show exactly what a real deployment would detect.",
+    ],
+    "security": [
+        "I'm a simulated assistant and wouldn't help with that. More importantly — if AIRS flagged this request, the scan badge above shows BLOCKED, meaning the message would never reach a real model at all.",
+        "Notice the scan result above. AIRS would intercept this before any model sees it. That's the value: blocking threats at the gateway, not relying on model refusals.",
+    ],
+    "default": [
+        "This is a simulated response — no LLM running. The real value is in the AIRS scan badges above your message: they show what pattern-matching detected. Enable **Local LLM** mode for real AI responses.",
+        "Full demo mode: responses are local and instant, no Ollama needed. Your message was scanned by a simulated AIRS engine — check the pre-call badge to see what it found (or didn't). Switch to Local LLM or Live mode for real AI.",
+        "Simulated response. The interesting part is the scan result above — in a real deployment, AIRS would have analyzed your message with ML models before it ever reached the LLM. Demo mode uses pattern-matching to approximate that.",
+    ],
+}
+
+import random as _random
+
+def simulate_llm_response(user_message: str) -> str:
+    msg = user_message.lower()
+    if any(w in msg for w in ["hello", "hi", "hey", "howdy", "greetings", "good morning", "good afternoon"]):
+        return _random.choice(_SIM_RESPONSES["greeting"])
+    if any(w in msg for w in ["airs", "palo alto", "panw", "ai runtime security", "runtime security"]):
+        return _random.choice(_SIM_RESPONSES["airs"])
+    if any(w in msg for w in ["code", "function", "python", "javascript", "script", "write a", "create a", "build a", "generate"]):
+        return _random.choice(_SIM_RESPONSES["code"])
+    if any(w in msg for w in ["hack", "exploit", "bypass", "malware", "virus", "bomb", "weapon", "drug", "synthesize"]):
+        return _random.choice(_SIM_RESPONSES["security"])
+    return _random.choice(_SIM_RESPONSES["default"])
+
+
+# ---------------------------------------------------------------------------
 # Threat explanation via LLM
 # ---------------------------------------------------------------------------
 
@@ -482,9 +525,14 @@ def call_llm_with_tools(messages: list[dict], model: str | None = None, system_p
 def generate_chat_stream(
     user_message, history, pre_scan_enabled, post_scan_enabled,
     selected_model, selected_system_prompt, request_meta, use_tools=False,
-    demo_mode=False,
+    mode="full_demo",
 ):
     """SSE generator for /chat/stream — yields pre_scan, token×N, post_scan, done events.
+
+    mode values:
+      "full_demo"  — simulated AIRS + simulated LLM (no Ollama, no credentials needed)
+      "local_llm"  — simulated AIRS + real Ollama LLM
+      "live"       — real AIRS + real Ollama LLM
 
     When use_tools=True, inserts tool-call hops between pre- and post-scan:
       user → AIRS pre-scan → LLM (tool call detection) →
@@ -497,7 +545,7 @@ def generate_chat_stream(
 
     pre_scan_result = None
 
-    _scan = simulate_airs_scan if demo_mode else scan_with_airs
+    _scan = scan_with_airs if mode == "live" else simulate_airs_scan
 
     if pre_scan_enabled:
         pre_scan_result = _scan(user_message, scan_type="prompt")
@@ -609,13 +657,22 @@ def generate_chat_stream(
     # Final (or only) LLM streaming pass
     # ------------------------------------------------------------------
     full_response_parts = []
-    try:
-        for token in call_llm_stream(messages, model=selected_model, system_prompt=selected_system_prompt):
-            full_response_parts.append(token)
-            yield sse("token", {"text": token})
-    except Exception as e:
-        yield sse("error", {"error": f"LLM API error: {e}"})
-        return
+    if mode == "full_demo":
+        # Simulate streaming by yielding the response word-by-word
+        sim_text = simulate_llm_response(user_message)
+        words = sim_text.split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            full_response_parts.append(chunk)
+            yield sse("token", {"text": chunk})
+    else:
+        try:
+            for token in call_llm_stream(messages, model=selected_model, system_prompt=selected_system_prompt):
+                full_response_parts.append(token)
+                yield sse("token", {"text": token})
+        except Exception as e:
+            yield sse("error", {"error": f"LLM API error: {e}"})
+            return
 
     llm_response = "".join(full_response_parts)
 
@@ -740,7 +797,9 @@ def chat_stream():
     pre_scan_enabled = data.get("preScan", True)
     post_scan_enabled = data.get("postScan", True)
     use_tools = data.get("useTools", False)
-    demo_mode = data.get("demoMode", False)
+    mode = data.get("mode", "full_demo")
+    if mode not in ("full_demo", "local_llm", "live"):
+        mode = "full_demo"
     selected_model = data.get("model") or LLM_MODEL
     selected_system_prompt = data.get("systemPrompt") or None
     request_meta = {
@@ -748,14 +807,14 @@ def chat_stream():
         "preScan": pre_scan_enabled,
         "postScan": post_scan_enabled,
         "useTools": use_tools,
-        "demoMode": demo_mode,
+        "mode": mode,
         "model": selected_model,
     }
     return Response(
         stream_with_context(generate_chat_stream(
             user_message, history, pre_scan_enabled, post_scan_enabled,
             selected_model, selected_system_prompt, request_meta,
-            use_tools=use_tools, demo_mode=demo_mode,
+            use_tools=use_tools, mode=mode,
         )),
         content_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -1334,38 +1393,52 @@ HTML_TEMPLATE = r"""
   .seq-start .seq-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #d4884a; white-space: nowrap; padding: 0 4px; }
   .seq-turn { font-size: 10px; font-weight: 600; letter-spacing: 0.5px; color: rgba(210,120,40,0.6); white-space: nowrap; padding: 0 4px; }
   /* ── Main layout ── */
-  .main-layout { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
-  .threat-sidebar { width: 280px; flex-shrink: 0; background: #12141a; border-right: 1px solid rgba(255,255,255,0.07); overflow: hidden; display: flex; flex-direction: column; transition: width 0.2s; }
-  .threat-sidebar.collapsed { width: 32px; }
+  .main-layout { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; gap: 0; padding: 8px 8px 0 8px; background: #0d0f14; }
+  /* ── Threat Library sidebar ── */
+  .threat-sidebar { width: 272px; flex-shrink: 0; background: #14161e; border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: width 0.22s ease, opacity 0.15s; box-shadow: 0 4px 24px rgba(0,0,0,0.35); margin-right: 8px; margin-bottom: 8px; }
+  .threat-sidebar.collapsed { width: 36px; }
   .threat-sidebar.collapsed .sidebar-content, .threat-sidebar.collapsed .sidebar-title { display: none; }
   .threat-sidebar.collapsed .sidebar-collapse { transform: rotate(180deg); }
   .main-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-  .sidebar-hdr { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.07); flex-shrink: 0; }
-  .sidebar-title { font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #a0aabf; text-transform: uppercase; }
-  .sidebar-collapse { background: none; border: none; color: #6a6e78; cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 3px; }
-  .sidebar-collapse:hover { background: rgba(255,255,255,0.06); color: #a0aabf; }
-  .sidebar-content { flex: 1; overflow-y: auto; padding: 8px 0; }
-  .threat-cat-hdr { display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #7a8aaa; text-transform: uppercase; user-select: none; }
-  .threat-cat-hdr:hover { color: #a0aabf; background: rgba(255,255,255,0.03); }
-  .threat-cat-arrow { font-size: 9px; transition: transform 0.15s; }
+  .sidebar-hdr { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.07); flex-shrink: 0; background: rgba(255,255,255,0.02); border-radius: 12px 12px 0 0; }
+  .sidebar-title { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; color: #a8b4cc; text-transform: uppercase; }
+  .sidebar-collapse { background: none; border: none; color: #6a6e78; cursor: pointer; font-size: 11px; padding: 3px 5px; border-radius: 5px; transition: background 0.12s; }
+  .sidebar-collapse:hover { background: rgba(255,255,255,0.08); color: #a0aabf; }
+  .sidebar-content { flex: 1; overflow-y: auto; padding: 6px 0 8px; }
+  .sidebar-content::-webkit-scrollbar { width: 4px; }
+  .sidebar-content::-webkit-scrollbar-track { background: transparent; }
+  .sidebar-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  .threat-cat { margin: 2px 6px; border-radius: 8px; overflow: hidden; }
+  .threat-cat-hdr { display: flex; align-items: center; gap: 6px; padding: 7px 10px; cursor: pointer; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #7a8aaa; text-transform: uppercase; user-select: none; border-radius: 8px; transition: background 0.12s, color 0.12s; }
+  .threat-cat-hdr:hover { color: #b0bdd4; background: rgba(255,255,255,0.05); }
+  .threat-cat.open .threat-cat-hdr { color: #c0ccde; background: rgba(255,255,255,0.04); border-radius: 8px 8px 0 0; }
+  .threat-cat-arrow { font-size: 9px; transition: transform 0.15s; display: inline-block; }
   .threat-cat.open .threat-cat-arrow { transform: rotate(90deg); }
-  .threat-cards { display: none; }
+  .threat-cards { display: none; padding: 2px 0 4px; border-top: 1px solid rgba(255,255,255,0.04); background: rgba(0,0,0,0.15); border-radius: 0 0 8px 8px; }
   .threat-cat.open .threat-cards { display: block; }
-  .threat-card { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  .threat-card:hover { background: rgba(255,255,255,0.03); }
-  .threat-card-name { font-size: 12px; font-weight: 600; color: #c8d0e0; margin-bottom: 3px; }
-  .threat-card-desc { font-size: 10px; color: #6a6e78; line-height: 1.4; margin-bottom: 3px; }
-  .threat-card-airs { font-size: 10px; color: #4d9e6a; margin-bottom: 5px; }
-  .threat-try-btn { font-size: 10px; padding: 2px 8px; background: rgba(74,140,196,0.12); border: 1px solid rgba(74,140,196,0.3); color: #7aa2d4; border-radius: 3px; cursor: pointer; }
-  .threat-try-btn:hover { background: rgba(74,140,196,0.22); }
-  /* Demo mode */
-  .demo-toggle { color: #d4884a !important; }
-  .demo-toggle input { accent-color: #c47830; }
-  .demo-banner { display: none; font-size: 11px; background: rgba(210,120,40,0.15); border-bottom: 1px solid rgba(210,120,40,0.3); color: #d4884a; padding: 4px 12px; text-align: center; letter-spacing: 0.3px; flex-shrink: 0; }
+  .threat-card { margin: 4px 8px; padding: 9px 11px; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; transition: background 0.12s, border-color 0.12s; }
+  .threat-card:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+  .threat-card-name { font-size: 12px; font-weight: 600; color: #c8d4e8; margin-bottom: 4px; }
+  .threat-card-desc { font-size: 10px; color: #5e6880; line-height: 1.45; margin-bottom: 4px; }
+  .threat-card-airs { font-size: 10px; color: #4a9e72; margin-bottom: 7px; line-height: 1.4; }
+  .threat-try-btn { font-size: 10px; padding: 3px 10px; background: rgba(74,140,196,0.12); border: 1px solid rgba(74,140,196,0.28); color: #7aa2d4; border-radius: 20px; cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+  .threat-try-btn:hover { background: rgba(74,140,196,0.25); border-color: rgba(74,140,196,0.5); color: #9fc0e8; }
+  /* ── Mode selector ── */
+  .mode-selector { display: flex; align-items: center; gap: 0; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 2px; }
+  .mode-btn { font-size: 10px; font-weight: 600; letter-spacing: 0.3px; padding: 3px 10px; border: none; background: none; color: #6a7288; cursor: pointer; border-radius: 16px; transition: background 0.15s, color 0.15s; white-space: nowrap; }
+  .mode-btn:hover { color: #a0aabf; }
+  .mode-btn.active { background: rgba(74,140,196,0.22); color: #9fc0e8; }
+  .mode-btn.active[data-mode="full_demo"] { background: rgba(80,180,120,0.2); color: #6ad4a0; }
+  .mode-btn.active[data-mode="live"] { background: rgba(210,80,80,0.2); color: #e08888; }
+  /* ── Demo/mode banner ── */
+  .demo-banner { display: none; font-size: 11px; border-bottom: 1px solid; padding: 4px 14px; text-align: center; letter-spacing: 0.3px; flex-shrink: 0; }
   .demo-banner.visible { display: block; }
-  /* Simulated scan badge */
-  .sim-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: rgba(210,120,40,0.2); color: #d4884a; border: 1px solid rgba(210,120,40,0.35); letter-spacing: 0.3px; }
-  .sim-info { font-size: 10px; color: #b07030; margin-top: 3px; padding: 4px 8px; background: rgba(210,120,40,0.07); border-radius: 3px; border-left: 2px solid rgba(210,120,40,0.4); }
+  .demo-banner.mode-full_demo { background: rgba(80,180,120,0.1); border-color: rgba(80,180,120,0.25); color: #5dc495; }
+  .demo-banner.mode-local_llm { background: rgba(74,140,196,0.1); border-color: rgba(74,140,196,0.25); color: #7aa2d4; }
+  .demo-banner.mode-live { background: rgba(210,80,80,0.1); border-color: rgba(210,80,80,0.2); color: #d47878; }
+  /* ── Simulated scan badge ── */
+  .sim-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; background: rgba(210,120,40,0.2); color: #d4884a; border: 1px solid rgba(210,120,40,0.35); letter-spacing: 0.3px; }
+  .sim-info { font-size: 10px; color: #b07030; margin-top: 3px; padding: 4px 8px; background: rgba(210,120,40,0.07); border-radius: 6px; border-left: 2px solid rgba(210,120,40,0.4); }
 </style>
 </head>
 <body>
@@ -1381,7 +1454,11 @@ HTML_TEMPLATE = r"""
     <label class="toggle"><input type="checkbox" id="preScan" checked> Pre-Call Scan</label>
     <label class="toggle"><input type="checkbox" id="postScan" checked> Post-Call Scan</label>
     <label class="toggle tool-toggle"><input type="checkbox" id="useTools"> Tool Calls</label>
-    <label class="toggle demo-toggle"><input type="checkbox" id="demoMode" onchange="onDemoModeChange()"> Demo Mode</label>
+    <div class="mode-selector">
+      <button class="mode-btn active" data-mode="full_demo" onclick="setMode('full_demo')" title="No installation needed — simulated AIRS + simulated LLM">Full Demo</button>
+      <button class="mode-btn" data-mode="local_llm" onclick="setMode('local_llm')" title="Requires Ollama running locally — real LLM + simulated AIRS">Local LLM</button>
+      <button class="mode-btn" data-mode="live" onclick="setMode('live')" title="Requires Ollama + AIRS credentials — fully live">Live</button>
+    </div>
     <select id="modelSelect" class="model-select" title="Select Ollama model">
       <option value="">Loading…</option>
     </select>
@@ -1629,7 +1706,7 @@ HTML_TEMPLATE = r"""
   </div>
 </aside>
 <div class="main-col">
-<div class="demo-banner" id="demoBanner">&#128272; DEMO MODE ACTIVE &mdash; Scans use local pattern matching. No real AIRS tenant needed. Results are educational approximations of AIRS behavior.</div>
+<div class="demo-banner mode-full_demo visible" id="demoBanner">&#9654; FULL DEMO &mdash; No installation needed. LLM responses and AIRS scans are both simulated locally. Switch to Local LLM or Live for real AI.</div>
 <div class="test-buttons">
   <span class="test-label">Test:</span>
   <button class="test-btn" onclick="fillPrompt('What is the capital of France?')">Benign</button>
@@ -1917,7 +1994,7 @@ async function sendMessageText(msg) {
         preScan: document.getElementById('preScan').checked,
         postScan: document.getElementById('postScan').checked,
         useTools: document.getElementById('useTools').checked,
-        demoMode: document.getElementById('demoMode').checked,
+        mode: currentMode,
         model: document.getElementById('modelSelect').value || undefined,
         systemPrompt: document.getElementById('systemPromptInput').value.trim() || undefined,
       })
@@ -2297,9 +2374,22 @@ function toggleCat(id) {
   document.getElementById(id).classList.toggle('open');
 }
 
-function onDemoModeChange() {
-  const on = document.getElementById('demoMode').checked;
-  document.getElementById('demoBanner').classList.toggle('visible', on);
+let currentMode = 'full_demo';
+
+const _bannerText = {
+  full_demo: '&#9654; FULL DEMO — No installation needed. LLM responses and AIRS scans are both simulated locally. Switch to Local LLM or Live for real AI.',
+  local_llm: '&#9654; LOCAL LLM — Real Ollama LLM is active. AIRS scans are simulated (pattern-matched). No AIRS credentials required.',
+  live: '&#9654; LIVE MODE — Real Ollama LLM + real AIRS tenant. Ensure Ollama is running and AIRS credentials are configured in app.py.',
+};
+
+function setMode(m) {
+  currentMode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === m);
+  });
+  const banner = document.getElementById('demoBanner');
+  banner.className = `demo-banner mode-${m} visible`;
+  banner.innerHTML = _bannerText[m] || '';
 }
 
 function trySendThreat(n) {
