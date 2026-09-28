@@ -290,17 +290,17 @@ _SIM_RESPONSES = {
         "AIRS sits inline between your users and your AI model. It uses ML-based behavioral analysis to detect threats like DAN jailbreaks, indirect prompt injection, PII leakage, and evasion techniques — blocking them before they reach the model or the user.",
     ],
     "code": [
-        "In full demo mode I simulate code responses. In a real deployment, the LLM would generate working code here. Notice how AIRS scanned your request — that's what happens with every message in a production AI app.",
-        "I'd generate code here if an LLM were running. Switch to **Local LLM** mode (needs Ollama) for real code generation. The AIRS scan badges above still show exactly what a real deployment would detect.",
+        "LLM responses are simulated in this configuration. In a real deployment, the LLM would generate working code here. Notice how AIRS scanned your request — that's what happens with every message in a production AI app.",
+        "LLM responses are stubbed — AIRS scanned your request, but code generation requires a real LLM. The scan badges above show exactly what a live deployment would detect.",
     ],
     "security": [
         "I'm a simulated assistant and wouldn't help with that. More importantly — if AIRS flagged this request, the scan badge above shows BLOCKED, meaning the message would never reach a real model at all.",
         "Notice the scan result above. AIRS would intercept this before any model sees it. That's the value: blocking threats at the gateway, not relying on model refusals.",
     ],
     "default": [
-        "This is a simulated response — no LLM running. The real value is in the AIRS scan badges above your message: they show what pattern-matching detected. Enable **Local LLM** mode for real AI responses.",
-        "Full demo mode: responses are local and instant, no Ollama needed. Your message was scanned by a simulated AIRS engine — check the pre-call badge to see what it found (or didn't). Switch to Local LLM or Live mode for real AI.",
-        "Simulated response. The interesting part is the scan result above — in a real deployment, AIRS would have analyzed your message with ML models before it ever reached the LLM. Demo mode uses pattern-matching to approximate that.",
+        "LLM responses are stubbed in this configuration. The real value is in the AIRS scan badges above your message — they show what was detected (or not) before this response was generated.",
+        "This is a canned response — no LLM call was made. The AIRS scan above is the focus here: in a production AI app, every prompt and response passes through that inspection layer.",
+        "Stubbed response. The interesting part is the scan result above — AIRS analyzed your message before it would have reached any model. That interception layer is what protects real AI deployments.",
     ],
 }
 
@@ -364,13 +364,13 @@ _THREAT_EXPLANATIONS_STATIC = {
 
 
 def get_threat_explanation(category: str, scan_type: str = "prompt", simulated: bool = False) -> str:
-    """Return a TARS-voiced educational explanation for a detected threat category.
+    """Return an educational explanation for a detected threat category.
 
-    In simulated (demo) mode, returns static pre-written explanations — no LLM required.
-    In live/local-llm mode, makes a short focused LLM call.
+    Prefers static pre-written explanations when available (no LLM required).
+    Falls back to a short LLM call only when no static text exists and simulated=False.
     Returns empty string on any error so callers can treat it as optional.
     """
-    if simulated:
+    if simulated or category in _THREAT_EXPLANATIONS_STATIC:
         return _THREAT_EXPLANATIONS_STATIC.get(category, "")
 
     category_display = category.replace("_", " ").lower() if category else "unknown threat"
@@ -600,6 +600,7 @@ def generate_chat_stream(
     mode values:
       "full_demo"  — simulated AIRS + simulated LLM (no Ollama, no credentials needed)
       "local_llm"  — simulated AIRS + real Ollama LLM
+      "live_stub"  — real AIRS + stubbed LLM (needs AIRS credentials, no Ollama required)
       "live"       — real AIRS + real Ollama LLM
 
     When use_tools=True, inserts tool-call hops between pre- and post-scan:
@@ -613,7 +614,7 @@ def generate_chat_stream(
 
     pre_scan_result = None
 
-    _scan = scan_with_airs if mode == "live" else simulate_airs_scan
+    _scan = scan_with_airs if mode in ("live", "live_stub") else simulate_airs_scan
 
     if pre_scan_enabled:
         pre_scan_result = _scan(user_message, scan_type="prompt")
@@ -638,6 +639,9 @@ def generate_chat_stream(
     # ------------------------------------------------------------------
     # Tool call hop (when use_tools=True)
     # ------------------------------------------------------------------
+    if use_tools and mode == "live_stub":
+        use_tools = False  # tool detection requires a real LLM call; skip in stub mode
+
     if use_tools:
         try:
             tool_response = call_llm_with_tools(messages, model=selected_model, system_prompt=selected_system_prompt)
@@ -725,7 +729,7 @@ def generate_chat_stream(
     # Final (or only) LLM streaming pass
     # ------------------------------------------------------------------
     full_response_parts = []
-    if mode == "full_demo":
+    if mode in ("full_demo", "live_stub"):
         # Simulate streaming by yielding the response word-by-word
         sim_text = simulate_llm_response(user_message)
         words = sim_text.split(" ")
@@ -866,7 +870,7 @@ def chat_stream():
     post_scan_enabled = data.get("postScan", True)
     use_tools = data.get("useTools", False)
     mode = data.get("mode", "full_demo")
-    if mode not in ("full_demo", "local_llm", "live"):
+    if mode not in ("full_demo", "local_llm", "live_stub", "live"):
         mode = "full_demo"
     selected_model = data.get("model") or LLM_MODEL
     selected_system_prompt = data.get("systemPrompt") or None
@@ -1544,6 +1548,7 @@ HTML_TEMPLATE = r"""
   .demo-banner.visible { display: block; }
   .demo-banner.mode-full_demo { background: rgba(80,180,120,0.1); border-color: rgba(80,180,120,0.25); color: #5dc495; }
   .demo-banner.mode-local_llm { background: rgba(74,140,196,0.1); border-color: rgba(74,140,196,0.25); color: #7aa2d4; }
+  .demo-banner.mode-live_stub { background: rgba(180,120,220,0.1); border-color: rgba(180,120,220,0.25); color: #c09ad8; }
   .demo-banner.mode-live { background: rgba(210,80,80,0.1); border-color: rgba(210,80,80,0.2); color: #d47878; }
   /* ── Simulated scan badge ── */
   .sim-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; background: rgba(210,120,40,0.2); color: #d4884a; border: 1px solid rgba(210,120,40,0.35); letter-spacing: 0.3px; }
@@ -1566,6 +1571,7 @@ HTML_TEMPLATE = r"""
     <div class="mode-selector">
       <button class="mode-btn active" data-mode="full_demo" onclick="setMode('full_demo')" title="No installation needed — simulated AIRS + simulated LLM">Full Demo</button>
       <button class="mode-btn" data-mode="local_llm" onclick="setMode('local_llm')" title="Requires Ollama running locally — real LLM + simulated AIRS">Local LLM</button>
+      <button class="mode-btn" data-mode="live_stub" onclick="setMode('live_stub')" title="Real AIRS scanning + stubbed LLM — no Ollama required">Live AIRS</button>
       <button class="mode-btn" data-mode="live" onclick="setMode('live')" title="Requires Ollama + AIRS credentials — fully live">Live</button>
     </div>
     <select id="modelSelect" class="model-select" title="Select Ollama model">
@@ -2469,6 +2475,7 @@ let currentMode = 'full_demo';
 const _bannerText = {
   full_demo: '&#9654; FULL DEMO — No installation needed. LLM responses and AIRS scans are both simulated locally. Switch to Local LLM or Live for real AI.',
   local_llm: '&#9654; LOCAL LLM — Real Ollama LLM is active. AIRS scans are simulated (pattern-matched). No AIRS credentials required.',
+  live_stub: '&#9654; LIVE AIRS — Real AIRS tenant is scanning every message. LLM responses are stubbed (no Ollama required). Ensure AIRS credentials are configured in app.py.',
   live: '&#9654; LIVE MODE — Real Ollama LLM + real AIRS tenant. Ensure Ollama is running and AIRS credentials are configured in app.py.',
 };
 
@@ -2537,12 +2544,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp();
     <p>When a block occurs you will also see a gold <strong>Threat Intel</strong> panel explaining what
     category was detected and why it matters.</p>
 
-    <h3>The three modes</h3>
+    <h3>The four modes</h3>
     <ul>
       <li><code>Full Demo</code> &mdash; Everything is simulated. No install needed. Great for learning.</li>
       <li><code>Local LLM</code> &mdash; Requires <a href="https://ollama.com" target="_blank" style="color:#7ab8d4">Ollama</a>
       running on your machine. Real AI responses, simulated AIRS.</li>
-      <li><code>Live</code> &mdash; Requires Ollama <em>and</em> PANW AIRS credentials. Fully live security scanning.</li>
+      <li><code>Live AIRS</code> &mdash; Requires PANW AIRS credentials only. Real AIRS scanning with stubbed LLM responses — no Ollama needed.</li>
+      <li><code>Live</code> &mdash; Requires Ollama <em>and</em> PANW AIRS credentials. Fully live AI + security scanning.</li>
     </ul>
 
     <h3>Threat Library quick start</h3>
